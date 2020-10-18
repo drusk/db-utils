@@ -3,15 +3,16 @@ import os
 import sys
 
 
-class StoredProcedure:
+class DatabaseObject:
     SIGNATURE_REGEX = re.compile(
-        "CREATE (FUNCTION|PROCEDURE) ([^\s^\(]+)",
+        "CREATE (FUNCTION|PROCEDURE|TABLE) ([^\s^\(]+)",
         re.IGNORECASE
     )
 
     TYPE_CODES = {
         "PROCEDURE": "SP",
-        "FUNCTION": "FN"
+        "FUNCTION": "FN",
+        "TABLE": "TB"
     }
 
     def __init__(self, text):
@@ -20,20 +21,21 @@ class StoredProcedure:
 
     def _parse(self, text):
         """
-        Parses the name and type (function or procedure).
+        Parses the name and type (function, procedure or table).
 
-        Example function and signatures:
+        Example database objects and signatures:
         CREATE FUNCTION [addr].[InstitutionCountryCode] (@InstitutionID INT)
         CREATE PROCEDURE [addr].[GetAddressTypes]
+        CREATE TABLE [addr].[ADDRESS_TYPES]
 
-        The names are '[addr].[InstitutionCountryCode]'
-        and '[addr].[GetAddressTypes]'
+        The names are '[addr].[InstitutionCountryCode]',
+        '[addr].[GetAddressTypes]' and '[addr].[ADDRESS_TYPES]'
         """
         match = re.search(self.SIGNATURE_REGEX, text)
         if match:
             return match.group(1), match.group(2)
         else:
-            raise ValueError(f"No name found for stored procedure: {self._text}")
+            raise ValueError(f"No name found for database object: {self._text}")
 
     def get_type_code(self):
         return self.TYPE_CODES[self._type.upper()]
@@ -62,7 +64,7 @@ class StoredProcedure:
         return re.sub(r"Script Date: [^\*]+", "", self._text)
 
 
-def split_stored_procedures(all_text):
+def split_database_objects(all_text):
     # If the comment format can change, maybe make this more robust
     delimiter = "/****** Object:"
 
@@ -70,7 +72,7 @@ def split_stored_procedures(all_text):
               for chunk in all_text.split("/****** Object:")]
 
     # First chunk is just the database name so leave it out
-    return [StoredProcedure(chunk) for chunk in chunks[1:]]
+    return [DatabaseObject(chunk) for chunk in chunks[1:]]
 
 
 def get_table_name(all_text):
@@ -92,7 +94,7 @@ class OutputFileGenerator:
         self._setup_directories()
 
     def _setup_directories(self):
-        for type_code in StoredProcedure.TYPE_CODES.values():
+        for type_code in DatabaseObject.TYPE_CODES.values():
             os.makedirs(
                 os.path.join(self._output_directory, type_code),
                 exist_ok=True
@@ -120,21 +122,21 @@ def main():
     with open(sys.argv[1], "r") as filehandle:
         dump_text = filehandle.read()
 
-    stored_procedures = split_stored_procedures(dump_text)
-    print(f"Parsed {len(stored_procedures)} stored procedures.")
+    stored_procedures = split_database_objects(dump_text)
+    print(f"Parsed {len(stored_procedures)} database objects.")
 
     output_directory = None
     table_name = get_table_name(dump_text)
-    if table_name:
+    if table_name and len(sys.argv) == 2:
         output_directory = table_name
-        print(f"Set output directory based on table name: {output_directory}")
+        print(f"Set output directory based on database instance name: {output_directory}")
     if len(sys.argv) == 3:
         output_directory = sys.argv[2]
         print(f"Command line override of output directory: {output_directory}")
 
     if not output_directory:
         raise ValueError("No output directory provided on command line and "
-                         "no table name in dump.")
+                         "no database instance name in dump.")
 
     output_file_generator = OutputFileGenerator(output_directory)
     for stored_procedure in stored_procedures:
